@@ -379,15 +379,10 @@ The automatic response saving in `05-manual-context.py` implements a production-
 
 ## 🔗 Additional Resources & References
 
-### Official Documentation
-- [Sourcegraph API Documentation](https://docs.sourcegraph.com/api) - Complete API reference
-- [Cody Documentation](https://docs.sourcegraph.com/cody) - Cody-specific features and capabilities
-- [Sourcegraph GraphQL API](https://docs.sourcegraph.com/api/graphql) - Advanced querying capabilities
-
 ### AI & Tool Calling References
 - [Anthropic Tool Use Documentation](https://docs.anthropic.com/en/docs/build-with-claude/tool-use) - Official Claude tool calling guide
 - [OpenAI Function Calling Guide](https://platform.openai.com/docs/guides/function-calling) - OpenAI's approach to function calling
-- [Function Calling Best Practices](https://github.com/sourcegraph/cody) - Sourcegraph Cody examples and patterns
+
 
 ### Community & Support
 - [Sourcegraph Community Forum](https://community.sourcegraph.com/) - Ask questions and share solutions

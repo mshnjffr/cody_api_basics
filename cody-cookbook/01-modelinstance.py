@@ -21,6 +21,7 @@ import sys
 import json
 import requests
 from dotenv import load_dotenv
+from utils.file_utils import save_model_instance_to_markdown, save_data_to_json
 
 # Load environment variables from .env file
 load_dotenv()
@@ -60,6 +61,22 @@ def get_model_details(model_id):
         print(f"Object:     {model.get('object', 'N/A')}")
         print(f"Owner:      {model.get('owned_by', 'N/A')}")
         print(f"Created:    {model.get('created', 'N/A')}")
+        
+        # Save model details to files
+        script_name = os.path.splitext(os.path.basename(__file__))[0]
+        
+        # Save as Markdown for documentation
+        md_path = save_model_instance_to_markdown(model, script_name)
+        
+        # Save raw JSON for programmatic access
+        json_path = save_data_to_json(model, f"{script_name}_{model_id.replace('::', '_')}")
+        
+        if md_path or json_path:
+            print(f"\n📁 Model details saved:")
+            if md_path:
+                print(f"   📝 Documentation: {md_path}")
+            if json_path:
+                print(f"   📄 Raw JSON: {json_path}")
         
         print(f"\n💡 This model can be used for chat completions in the next example (02-chat.py)")
         

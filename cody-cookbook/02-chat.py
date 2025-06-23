@@ -21,14 +21,16 @@ Make sure to set your environment variables in .env:
 import os
 import sys
 import json
+import time
 import requests
 from dotenv import load_dotenv
+from utils.file_utils import save_chat_session_to_markdown
 
 # Load environment variables from .env file
 load_dotenv()
 
-def send_chat_completion(model_id, messages, temperature=0.7, max_tokens=4000):
-    """Send a chat completion request to the Sourcegraph API."""
+def send_chat_completion(model_id, messages, temperature=0.7, max_tokens=4000, capture_details=False):
+    """Send a chat completion request to the Sourcegraph API with optional detailed capture."""
     
     # Get configuration from environment
     base_url = os.getenv('SOURCEGRAPH_URL')
@@ -58,16 +60,36 @@ def send_chat_completion(model_id, messages, temperature=0.7, max_tokens=4000):
         "temperature": temperature
     }
     
+    # Initialize API details capture
+    api_details = {} if capture_details else None
+    
     try:
         print(f"🤖 Sending message to {model_id}...")
         print(f"⚙️  Temperature: {temperature}, Max Tokens: {max_tokens}")
         print(f"💬 Conversation has {len(messages)} messages")
         print("-" * 50)
         
+        # Capture request details if needed
+        if capture_details:
+            api_details['url'] = url
+            api_details['headers'] = {k: v for k, v in headers.items()}  # Copy headers
+            api_details['request_payload'] = payload.copy()  # Copy payload
+        
+        # Record request time
+        start_time = time.time()
         response = requests.post(url, headers=headers, json=payload)
+        response_time = int((time.time() - start_time) * 1000)  # Convert to ms
+        
         response.raise_for_status()
         
         data = response.json()
+        
+        # Capture response details if needed
+        if capture_details:
+            api_details['status_code'] = response.status_code
+            api_details['response_time'] = response_time
+            api_details['response_data'] = data.copy()
+            api_details['usage'] = data.get('usage', {})
         
         # Extract the response
         if 'choices' in data and len(data['choices']) > 0:
@@ -82,9 +104,14 @@ def send_chat_completion(model_id, messages, temperature=0.7, max_tokens=4000):
                 print(f"   Completion tokens: {usage.get('completion_tokens', 'N/A')}")
                 print(f"   Total tokens: {usage.get('total_tokens', 'N/A')}")
             
+            # Return both message and API details
+            if capture_details:
+                return assistant_message, api_details
             return assistant_message
         else:
             print("❌ No response received from the model")
+            if capture_details:
+                return None, api_details
             return None
             
     except requests.exceptions.HTTPError as e:
@@ -107,6 +134,8 @@ def send_chat_completion(model_id, messages, temperature=0.7, max_tokens=4000):
         return None
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
+        if capture_details:
+            return None, api_details
         return None
 
 def interactive_chat(model_id):
@@ -119,6 +148,9 @@ def interactive_chat(model_id):
     temperature = 0.7
     max_tokens = 4000
     conversation_history = []  # Store the entire conversation
+    session_start_time = time.time()
+    api_calls_count = 0
+    api_calls_history = []  # Store all API call details
     
     while True:
         try:
@@ -163,8 +195,16 @@ def interactive_chat(model_id):
                 "content": user_input
             })
             
-            # Send the entire conversation to the API
-            assistant_response = send_chat_completion(model_id, conversation_history, temperature, max_tokens)
+            # Send the entire conversation to the API with details capture
+            result = send_chat_completion(model_id, conversation_history, temperature, max_tokens, capture_details=True)
+            api_calls_count += 1
+            
+            # Handle response (could be tuple or single value)
+            if isinstance(result, tuple):
+                assistant_response, api_details = result
+                api_calls_history.append(api_details)  # Store this API call
+            else:
+                assistant_response = result
             
             # Add assistant response to conversation history
             if assistant_response:
@@ -179,6 +219,32 @@ def interactive_chat(model_id):
         except EOFError:
             print("\n👋 Goodbye!")
             break
+    
+    # Save session details when chat ends
+    if conversation_history:
+        session_duration = time.time() - session_start_time
+        session_duration_str = f"{int(session_duration // 60)}m {int(session_duration % 60)}s"
+        
+        session_metadata = {
+            'model_id': model_id,
+            'temperature': temperature,
+            'max_tokens': max_tokens,
+            'duration': session_duration_str,
+            'api_calls_count': api_calls_count
+        }
+        
+        script_name = os.path.splitext(os.path.basename(__file__))[0]
+        saved_path = save_chat_session_to_markdown(
+            conversation_history, 
+            api_calls_history, 
+            session_metadata, 
+            script_name
+        )
+        
+        if saved_path:
+            print(f"\n📁 Chat session saved to: {saved_path}")
+    else:
+        print("\n📝 No conversation to save.")
 
 def main():
     # Default model

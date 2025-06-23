@@ -17,9 +17,12 @@ import os
 import json
 import requests
 from dotenv import load_dotenv
+from utils.file_utils import save_models_to_csv, save_models_to_markdown, save_data_to_json
 
 # Load environment variables from .env file
 load_dotenv()
+
+
 
 def get_available_models():
     """Fetch and display all available models from the Sourcegraph API."""
@@ -61,6 +64,27 @@ def get_available_models():
             created = model.get('created', 0)
             
             print(f"{model_id:<50} {owner:<15} {created}")
+        
+        # Save models to multiple formats
+        script_name = os.path.splitext(os.path.basename(__file__))[0]
+        
+        # Save as CSV for data analysis
+        csv_path = save_models_to_csv(models, script_name)
+        
+        # Save as Markdown for documentation
+        md_path = save_models_to_markdown(models, script_name)
+        
+        # Save raw JSON for programmatic access
+        json_path = save_data_to_json(data, f"{script_name}_raw")
+        
+        if csv_path or md_path or json_path:
+            print(f"📁 Models data saved in multiple formats:")
+            if csv_path:
+                print(f"   📊 CSV: {csv_path}")
+            if md_path:
+                print(f"   📝 Markdown: {md_path}")
+            if json_path:
+                print(f"   📄 JSON: {json_path}")
         
         print(f"\n💡 Tip: Copy a model ID to use in the next example (01-modelinstance.py)")
         

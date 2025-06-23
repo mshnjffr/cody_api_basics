@@ -15,14 +15,16 @@ Make sure to set your environment variables in .env:
 
 import os
 import json
+import time
 import requests
 from dotenv import load_dotenv
+from utils.file_utils import save_context_search_session_to_markdown
 
 # Load environment variables from .env file
 load_dotenv()
 
-def search_code_context(query, repos, code_results=15, text_results=5, file_patterns=None, version="1.0"):
-    """Search for code context using Cody's context API."""
+def search_code_context(query, repos, code_results=15, text_results=5, file_patterns=None, version="1.0", capture_details=False):
+    """Search for code context using Cody's context API with optional detailed capture."""
     
     # Get configuration from environment
     base_url = os.getenv('SOURCEGRAPH_URL')
@@ -57,6 +59,20 @@ def search_code_context(query, repos, code_results=15, text_results=5, file_patt
     if file_patterns:
         payload["filePatterns"] = file_patterns
     
+    # Initialize API details for tracking
+    api_details = {
+        'url': url,
+        'headers': headers.copy(),
+        'request_payload': payload.copy(),
+        'query': query,
+        'search_params': {
+            'code_results': code_results,
+            'text_results': text_results,
+            'file_patterns': file_patterns,
+            'version': version
+        }
+    }
+    
     try:
         print(f"🔍 Searching for: '{query}'")
         print(f"📚 Repositories: {[repo['name'] for repo in repos]}")
@@ -65,11 +81,22 @@ def search_code_context(query, repos, code_results=15, text_results=5, file_patt
             print(f"📁 File patterns: {file_patterns}")
         print("-" * 70)
         
+        # Capture timing
+        start_time = time.time()
         response = requests.post(url, headers=headers, json=payload)
+        response_time = int((time.time() - start_time) * 1000)  # Convert to ms
+        
         response.raise_for_status()
         
         data = response.json()
         results = data.get('results', [])
+        
+        # Capture response details if needed
+        if capture_details:
+            api_details['status_code'] = response.status_code
+            api_details['response_time'] = response_time
+            api_details['response_data'] = data.copy()
+            api_details['results_count'] = len(results)
         
         print(f"✅ Found {len(results)} context results:")
         print("=" * 70)
@@ -96,6 +123,9 @@ def search_code_context(query, repos, code_results=15, text_results=5, file_patt
             
             print("-" * 50)
         
+        # Return both results and API details
+        if capture_details:
+            return results, api_details
         return results
         
     except requests.exceptions.HTTPError as e:
@@ -105,9 +135,13 @@ def search_code_context(query, repos, code_results=15, text_results=5, file_patt
             print(f"📄 Response body: {error_body}")
         except:
             print("❌ Could not read response body")
+        if capture_details:
+            return None, api_details
         return None
     except requests.exceptions.RequestException as e:
         print(f"❌ Error making request: {e}")
+        if capture_details:
+            return None, api_details
         return None
     except json.JSONDecodeError as e:
         print(f"❌ Error parsing JSON response: {e}")
@@ -115,13 +149,17 @@ def search_code_context(query, repos, code_results=15, text_results=5, file_patt
             print(f"📄 Raw response: {response.text}")
         except:
             print("❌ Could not read response text")
+        if capture_details:
+            return None, api_details
         return None
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
+        if capture_details:
+            return None, api_details
         return None
 
 def run_context_examples():
-    """Run several examples of context search."""
+    """Run several examples of context search with session tracking."""
     
     # Example repositories - you may need to adjust these based on what's available
     example_repos = [
@@ -156,19 +194,69 @@ def run_context_examples():
     print("🧪 Running context search examples:")
     print("=" * 70)
     
+    search_history = []
+    session_start_time = time.time()
+    
     for i, example in enumerate(examples, 1):
         print(f"\n📝 Example {i}/{len(examples)}")
-        search_code_context(
+        
+        # Perform search with details capture
+        result = search_code_context(
             query=example["query"],
             repos=example["repos"],
             code_results=example.get("code_results", 5),
             text_results=example.get("text_results", 2),
-            file_patterns=example.get("file_patterns")
+            file_patterns=example.get("file_patterns"),
+            capture_details=True
         )
+        
+        # Handle response (could be tuple or single value)
+        if isinstance(result, tuple):
+            results, api_details = result
+        else:
+            results = result
+            api_details = {}
+        
+        # Store search details
+        if results is not None:
+            search_history.append({
+                'query': example["query"],
+                'results': results,
+                'api_details': api_details,
+                'search_params': {
+                    'code_results': example.get("code_results", 5),
+                    'text_results': example.get("text_results", 2),
+                    'file_patterns': example.get("file_patterns"),
+                    'version': "1.0"
+                }
+            })
+        
         print("=" * 70)
+    
+    # Save session details
+    if search_history:
+        session_duration = time.time() - session_start_time
+        session_duration_str = f"{int(session_duration // 60)}m {int(session_duration % 60)}s"
+        
+        session_metadata = {
+            'mode': 'examples',
+            'duration': session_duration_str,
+            'default_repos': example_repos,
+            'endpoint': f"{os.getenv('SOURCEGRAPH_URL')}/.api/cody/context"
+        }
+        
+        script_name = os.path.splitext(os.path.basename(__file__))[0]
+        saved_path = save_context_search_session_to_markdown(
+            search_history, 
+            session_metadata, 
+            script_name
+        )
+        
+        if saved_path:
+            print(f"\n📁 Context search session saved to: {saved_path}")
 
 def interactive_context_search():
-    """Run an interactive context search session with search history."""
+    """Run an interactive context search session with search history and session tracking."""
     print("🚀 Interactive Cody Context Search")
     print("Ask questions about code in natural language!")
     print("Type 'quit', 'exit', 'bye' to end, 'history' to see search history, or 'clear' to clear history")
@@ -184,7 +272,8 @@ def interactive_context_search():
     for repo in default_repos:
         print(f"   - {repo['name']}")
     
-    search_history = []  # Store previous searches
+    search_history = []  # Store previous searches with full details
+    session_start_time = time.time()
     
     while True:
         try:
@@ -201,7 +290,9 @@ def interactive_context_search():
                 if search_history:
                     print("📜 Search History:")
                     for i, search in enumerate(search_history, 1):
-                        print(f"   {i}. {search['query']} (found {search['result_count']} results)")
+                        result_count = len(search.get('results', []))
+                        response_time = search.get('api_details', {}).get('response_time', 'N/A')
+                        print(f"   {i}. {search['query']} (found {result_count} results, {response_time}ms)")
                 else:
                     print("📜 No search history")
                 continue
@@ -226,23 +317,35 @@ def interactive_context_search():
                 print("Using default result counts")
                 code_count, text_count = 5, 3
             
-            # Perform the search
-            results = search_code_context(
+            # Perform the search with details capture
+            result = search_code_context(
                 query=user_input,
                 repos=default_repos,
                 code_results=code_count,
                 text_results=text_count,
-                file_patterns=file_patterns
+                file_patterns=file_patterns,
+                capture_details=True
             )
             
-            # Add to search history
+            # Handle response (could be tuple or single value)
+            if isinstance(result, tuple):
+                results, api_details = result
+            else:
+                results = result
+                api_details = {}
+            
+            # Add to search history with full details
             if results is not None:
                 search_history.append({
                     "query": user_input,
-                    "result_count": len(results),
-                    "file_patterns": file_patterns,
-                    "code_count": code_count,
-                    "text_count": text_count
+                    "results": results,
+                    "api_details": api_details,
+                    "search_params": {
+                        "code_results": code_count,
+                        "text_results": text_count,
+                        "file_patterns": file_patterns,
+                        "version": "1.0"
+                    }
                 })
             
         except KeyboardInterrupt:
@@ -251,9 +354,33 @@ def interactive_context_search():
         except EOFError:
             print("\n👋 Goodbye!")
             break
+    
+    # Save session details when interactive session ends
+    if search_history:
+        session_duration = time.time() - session_start_time
+        session_duration_str = f"{int(session_duration // 60)}m {int(session_duration % 60)}s"
+        
+        session_metadata = {
+            'mode': 'interactive',
+            'duration': session_duration_str,
+            'default_repos': default_repos,
+            'endpoint': f"{os.getenv('SOURCEGRAPH_URL')}/.api/cody/context"
+        }
+        
+        script_name = os.path.splitext(os.path.basename(__file__))[0]
+        saved_path = save_context_search_session_to_markdown(
+            search_history, 
+            session_metadata, 
+            script_name
+        )
+        
+        if saved_path:
+            print(f"\n📁 Interactive search session saved to: {saved_path}")
+    else:
+        print("\n📝 No searches to save.")
 
 def conversational_context_search():
-    """Run a conversational context search that combines search results with chat."""
+    """Run a conversational context search that combines search results with chat and tracks everything."""
     print("🚀 Conversational Cody Context Search")
     print("Search for code and ask questions about the results!")
     print("Type 'quit', 'exit', 'bye' to end, 'search' to perform a new search, or 'clear' to clear context")
@@ -271,6 +398,8 @@ def conversational_context_search():
     
     current_context = []  # Store current search results as context
     conversation_history = []  # Store conversation
+    search_history = []  # Store all searches with full details
+    session_start_time = time.time()
     
     while True:
         try:
@@ -285,16 +414,39 @@ def conversational_context_search():
                     print("Please enter a search query")
                     continue
                 
-                # Perform context search
-                results = search_code_context(
+                # Perform context search with details capture
+                result = search_code_context(
                     query=search_query,
                     repos=default_repos,
                     code_results=5,
-                    text_results=3
+                    text_results=3,
+                    capture_details=True
                 )
+                
+                # Handle response (could be tuple or single value)
+                if isinstance(result, tuple):
+                    results, api_details = result
+                else:
+                    results = result
+                    api_details = {}
                 
                 if results:
                     current_context = results
+                    
+                    # Store search details
+                    search_history.append({
+                        'query': search_query,
+                        'results': results,
+                        'api_details': api_details,
+                        'search_params': {
+                            'code_results': 5,
+                            'text_results': 3,
+                            'file_patterns': None,
+                            'version': "1.0"
+                        },
+                        'used_for_conversation': True
+                    })
+                    
                     # Add search results as context to conversation
                     context_summary = f"Search results for '{search_query}':\n"
                     for i, result in enumerate(results[:3], 1):  # Limit context to first 3 results
@@ -321,7 +473,7 @@ def conversational_context_search():
                 break
             elif user_input.lower() == 'search':
                 current_context = []
-                conversation_history = []
+                # Keep conversation history for context but mark new search
                 print("✅ Starting new search...")
                 continue
             elif user_input.lower() == 'clear':
@@ -343,12 +495,52 @@ def conversational_context_search():
             print(f"   Current context: {len(current_context)} search results")
             print("   (Note: Actual chat integration would require a chat model setup)")
             
+            # Simulate assistant response for demonstration
+            conversation_history.append({
+                "role": "assistant",
+                "content": f"I would analyze the code context and provide insights about: '{user_input}'"
+            })
+            
         except KeyboardInterrupt:
             print("\n👋 Goodbye!")
             break
         except EOFError:
             print("\n👋 Goodbye!")
             break
+    
+    # Save both search session and conversation details when conversational session ends
+    if search_history or conversation_history:
+        session_duration = time.time() - session_start_time
+        session_duration_str = f"{int(session_duration // 60)}m {int(session_duration % 60)}s"
+        
+        # Save context search session
+        if search_history:
+            session_metadata = {
+                'mode': 'conversational',
+                'duration': session_duration_str,
+                'default_repos': default_repos,
+                'endpoint': f"{os.getenv('SOURCEGRAPH_URL')}/.api/cody/context",
+                'conversation_messages': len(conversation_history),
+                'includes_conversation': True,
+                'conversation_history': conversation_history
+            }
+            
+            script_name = os.path.splitext(os.path.basename(__file__))[0]
+            saved_path = save_context_search_session_to_markdown(
+                search_history, 
+                session_metadata, 
+                script_name
+            )
+            
+            if saved_path:
+                print(f"\n📁 Conversational search session saved to: {saved_path}")
+        
+        # Also save conversation history separately if needed
+        if conversation_history and len(conversation_history) > 1:  # More than just system message
+            print(f"\n💬 Conversation included {len(conversation_history)} messages")
+            print("   (Conversation details are included in the search session file)")
+    else:
+        print("\n📝 No searches or conversations to save.")
 
 def main():
     print("🔍 Sourcegraph Cody Context Search Examples")
